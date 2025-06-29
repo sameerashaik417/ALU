@@ -1,0 +1,117 @@
+module processor(
+    input clk,
+    input reset
+);
+    // Program Counter
+    reg [7:0] PC;
+
+    // Simple instruction memory (8 instructions max)
+    reg [15:0] instr_mem [0:7];
+
+    // Simple data memory (256 bytes)
+    reg [7:0] data_mem [0:255];
+
+    // Register file (8 registers)
+    reg [7:0] regfile [0:7];
+
+    // Pipeline registers
+    reg [15:0] IF_ID_instr, ID_EX_instr, EX_WB_instr;
+    reg [7:0] IF_ID_PC, ID_EX_PC, EX_WB_PC;
+    reg [7:0] ID_EX_rs1data, ID_EX_rs2data, ID_EX_addr;
+    reg [7:0] EX_WB_result;
+
+    // Stage signals for simulation display
+    wire [15:0] IF_instr = instr_mem[PC];
+    wire [15:0] ID_instr = IF_ID_instr;
+    wire [15:0] EX_instr = ID_EX_instr;
+    wire [15:0] WB_instr = EX_WB_instr;
+
+    // Instruction decode fields
+    wire [3:0] opcode = IF_ID_instr[15:12];
+    wire [2:0] rd = IF_ID_instr[11:9];
+    wire [2:0] rs1 = IF_ID_instr[8:6];
+    wire [2:0] rs2 = IF_ID_instr[5:3];
+    wire [7:0] imm = IF_ID_instr[7:0];
+
+    // Opcodes
+    localparam OP_ADD = 4'b0001;
+    localparam OP_SUB = 4'b0010;
+    localparam OP_LOAD= 4'b0011;
+
+    integer i;
+    initial begin
+        // Initialize memories and registers
+        PC = 0;
+        IF_ID_instr = 0; ID_EX_instr = 0; EX_WB_instr = 0;
+        IF_ID_PC = 0; ID_EX_PC = 0; EX_WB_PC = 0;
+        ID_EX_rs1data = 0; ID_EX_rs2data = 0; ID_EX_addr = 0;
+        EX_WB_result = 0;
+        for(i=0;i<8;i=i+1) regfile[i]=0;
+        for(i=0;i<256;i=i+1) data_mem[i]=i;
+
+        // Example program:
+        // ADD r1, r2, r3    (r1 = r2 + r3)
+        // SUB r4, r1, r2    (r4 = r1 - r2)
+        // LOAD r5, 10       (r5 = MEM[10])
+        // ADD r6, r5, r5    (r6 = r5 + r5)
+        instr_mem[0] = {OP_ADD, 3'd1, 3'd2, 3'd3, 3'd0}; // ADD r1, r2, r3
+        instr_mem[1] = {OP_SUB, 3'd4, 3'd1, 3'd2, 3'd0}; // SUB r4, r1, r2
+        instr_mem[2] = {OP_LOAD,3'd5, 3'd0, 3'd0, 8'd10}; // LOAD r5, 10
+        instr_mem[3] = {OP_ADD, 3'd6, 3'd5, 3'd5, 3'd0}; // ADD r6, r5, r5
+        instr_mem[4] = 16'd0;
+        instr_mem[5] = 16'd0;
+        instr_mem[6] = 16'd0;
+        instr_mem[7] = 16'd0;
+    end
+
+    // Pipeline
+    always @(posedge clk or posedge reset) begin
+        if(reset) begin
+            PC <= 0;
+            IF_ID_instr <= 0; ID_EX_instr <= 0; EX_WB_instr <= 0;
+            IF_ID_PC <= 0; ID_EX_PC <= 0; EX_WB_PC <= 0;
+        end else begin
+            // WB Stage
+            if(EX_WB_instr[15:12] == OP_ADD || EX_WB_instr[15:12] == OP_SUB)
+                regfile[EX_WB_instr[11:9]] <= EX_WB_result;
+            else if(EX_WB_instr[15:12] == OP_LOAD)
+                regfile[EX_WB_instr[11:9]] <= EX_WB_result;
+
+            // EX Stage
+            case(ID_EX_instr[15:12])
+                OP_ADD: EX_WB_result <= ID_EX_rs1data + ID_EX_rs2data;
+                OP_SUB: EX_WB_result <= ID_EX_rs1data - ID_EX_rs2data;
+                OP_LOAD: EX_WB_result <= data_mem[ID_EX_addr];
+                default: EX_WB_result <= 8'd0;
+            endcase
+
+            // Pipeline register update
+            EX_WB_instr <= ID_EX_instr;
+            EX_WB_PC <= ID_EX_PC;
+
+            // ID Stage
+            ID_EX_instr <= IF_ID_instr;
+            ID_EX_PC <= IF_ID_PC;
+            ID_EX_rs1data <= regfile[rs1];
+            ID_EX_rs2data <= regfile[rs2];
+            ID_EX_addr <= imm;
+
+            // IF Stage
+            IF_ID_instr <= instr_mem[PC];
+            IF_ID_PC <= PC;
+            PC <= PC + 1;
+        end
+    end
+
+    // Debug: Display pipeline per cycle
+    always @(posedge clk) begin
+        $display("---- Cycle ----");
+        $display("IF : PC=%d Instr=%h", PC, IF_instr);
+        $display("ID : PC=%d Instr=%h", IF_ID_PC, ID_instr);
+        $display("EX : PC=%d Instr=%h", ID_EX_PC, EX_instr);
+        $display("WB : PC=%d Instr=%h", EX_WB_PC, WB_instr);
+        $display("Registers: %p", regfile);
+        $display("");
+    end
+
+endmodule
